@@ -173,7 +173,6 @@ impl SnippetStorage for JsonStorage {
 /// SQLite database-based storage
 pub struct SqliteStorage {
     conn: Connection,
-    db_path: PathBuf,
 }
 
 impl SqliteStorage {
@@ -210,7 +209,7 @@ impl SqliteStorage {
             StorageError::database("creating snippets table", e)
         })?;
 
-        Ok(Self { conn, db_path })
+        Ok(Self { conn })
     }
 }
 
