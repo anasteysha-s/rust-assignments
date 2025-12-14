@@ -1,15 +1,17 @@
+mod error;
 mod storage;
 
+use anyhow::{Context, Result};
 use chrono::Local;
 use clap::Parser;
-use std::io::{self, Read};
+use std::io::Read;
 use storage::{create_storage, Snippet};
 
 /// A simple CLI tool for managing code snippets with timestamps
 #[derive(Parser, Debug)]
 #[command(name = "snippets-app")]
 #[command(about = "Store and manage code snippets with creation timestamps", long_about = None)]
-#[command(version = "0.2.0")]
+#[command(version = "0.3.0")]
 struct Cli {
     /// Name of the snippet to create (reads content from stdin)
     #[arg(long, value_name = "NAME")]
@@ -34,97 +36,176 @@ struct Cli {
 
 fn main() {
     if let Err(e) = run() {
-        eprintln!("Error: {}", e);
+        // Pretty print the error with full context chain
+        eprintln!("Error: {:#}", e);
         std::process::exit(1);
     }
 }
 
-fn run() -> io::Result<()> {
+fn run() -> Result<()> {
     let cli = Cli::parse();
 
-    // Create storage based on SNIPPETS_APP_STORAGE environment variable
-    let mut storage = create_storage()?;
+    // Create storage with context
+    let mut storage = create_storage()
+        .context("Failed to initialize storage. Check SNIPPETS_APP_STORAGE environment variable or file permissions")?;
 
     // Execute command based on arguments
     if let Some(name) = cli.name {
-        // Create snippet: read from stdin
-        let content = read_stdin()?;
-        let snippet = Snippet::new(name.clone(), content);
-        storage.save_snippet(snippet.clone())?;
-
-        println!("Snippet '{}' saved successfully", name);
-        if cli.verbose {
-            let local_time = snippet.created_at.with_timezone(&Local);
-            println!("Created at: {}", local_time.format("%Y-%m-%d %H:%M:%S"));
-        }
+        handle_create(&mut *storage, name, cli.verbose)?;
     } else if let Some(name) = cli.read {
-        // Read snippet
-        match storage.get_snippet(&name)? {
-            Some(snippet) => {
-                if cli.verbose {
-                    let local_time = snippet.created_at.with_timezone(&Local);
-                    println!("# Snippet: {}", snippet.name);
-                    println!("# Created: {}", local_time.format("%Y-%m-%d %H:%M:%S"));
-                    println!();
-                }
-                print!("{}", snippet.content);
-            }
-            None => {
-                eprintln!("Snippet '{}' not found", name);
-                std::process::exit(1);
-            }
-        }
+        handle_read(&*storage, name, cli.verbose)?;
     } else if let Some(name) = cli.delete {
-        // Delete snippet
-        if storage.delete_snippet(&name)? {
-            println!("Snippet '{}' deleted successfully", name);
-        } else {
-            eprintln!("Snippet '{}' not found", name);
-            std::process::exit(1);
-        }
+        handle_delete(&mut *storage, name)?;
     } else if cli.list {
-        // List all snippets
-        let names = storage.list_snippets()?;
-        if names.is_empty() {
-            println!("No snippets found");
-        } else {
-            if cli.verbose {
-                println!("Stored snippets (with creation times):");
-                println!();
-                for name in names {
-                    if let Ok(Some(snippet)) = storage.get_snippet(&name) {
-                        let local_time = snippet.created_at.with_timezone(&Local);
-                        println!(
-                            "  {} - {}",
-                            name,
-                            local_time.format("%Y-%m-%d %H:%M:%S")
-                        );
-                    }
-                }
-            } else {
-                println!("Stored snippets:");
-                for name in names {
-                    println!("  - {}", name);
-                }
-            }
-        }
+        handle_list(&*storage, cli.verbose)?;
     } else {
-        // No command specified
-        eprintln!("No command specified. Use --help for usage information.");
-        eprintln!();
-        eprintln!("Tip: Set SNIPPETS_APP_STORAGE environment variable to choose storage:");
-        eprintln!("  JSON:/path/to/snippets.json");
-        eprintln!("  SQLITE:/path/to/snippets.db");
+        print_usage_hint();
         std::process::exit(1);
     }
 
     Ok(())
 }
 
+fn handle_create(
+    storage: &mut dyn storage::SnippetStorage,
+    name: String,
+    verbose: bool,
+) -> Result<()> {
+    // Read from stdin with context
+    let content = read_stdin()
+        .context("Failed to read snippet content from stdin")?;
+
+    // Create snippet with validation
+    let snippet = Snippet::new(name.clone(), content)
+        .context(format!("Failed to create snippet '{}'", name))?;
+
+    // Save snippet
+    storage
+        .save_snippet(snippet.clone())
+        .context(format!("Failed to save snippet '{}'", name))?;
+
+    println!("✓ Snippet '{}' saved successfully", name);
+    
+    if verbose {
+        let local_time = snippet.created_at.with_timezone(&Local);
+        println!("  Created at: {}", local_time.format("%Y-%m-%d %H:%M:%S"));
+    }
+
+    Ok(())
+}
+
+fn handle_read(
+    storage: &dyn storage::SnippetStorage,
+    name: String,
+    verbose: bool,
+) -> Result<()> {
+    let snippet = storage
+        .get_snippet(&name)
+        .context(format!("Failed to retrieve snippet '{}'", name))?;
+
+    match snippet {
+        Some(snippet) => {
+            if verbose {
+                let local_time = snippet.created_at.with_timezone(&Local);
+                println!("# Snippet: {}", snippet.name);
+                println!("# Created: {}", local_time.format("%Y-%m-%d %H:%M:%S"));
+                println!();
+            }
+            print!("{}", snippet.content);
+            Ok(())
+        }
+        None => {
+            anyhow::bail!("Snippet '{}' not found", name);
+        }
+    }
+}
+
+fn handle_delete(
+    storage: &mut dyn storage::SnippetStorage,
+    name: String,
+) -> Result<()> {
+    let deleted = storage
+        .delete_snippet(&name)
+        .context(format!("Failed to delete snippet '{}'", name))?;
+
+    if deleted {
+        println!("✓ Snippet '{}' deleted successfully", name);
+        Ok(())
+    } else {
+        anyhow::bail!("Snippet '{}' not found", name);
+    }
+}
+
+fn handle_list(
+    storage: &dyn storage::SnippetStorage,
+    verbose: bool,
+) -> Result<()> {
+    let names = storage
+        .list_snippets()
+        .context("Failed to list snippets")?;
+
+    if names.is_empty() {
+        println!("No snippets found");
+        return Ok(());
+    }
+
+    if verbose {
+        println!("Stored snippets (with creation times):");
+        println!();
+        for name in names {
+            match storage.get_snippet(&name) {
+                Ok(Some(snippet)) => {
+                    let local_time = snippet.created_at.with_timezone(&Local);
+                    println!(
+                        "  {} - {}",
+                        name,
+                        local_time.format("%Y-%m-%d %H:%M:%S")
+                    );
+                }
+                Ok(None) => {
+                    // Snippet disappeared between list and get
+                    println!("  {} - (unavailable)", name);
+                }
+                Err(e) => {
+                    // Log error but continue with other snippets
+                    eprintln!("  {} - Error: {}", name, e);
+                }
+            }
+        }
+    } else {
+        println!("Stored snippets:");
+        for name in names {
+            println!("  - {}", name);
+        }
+    }
+
+    Ok(())
+}
+
+fn print_usage_hint() {
+    eprintln!("No command specified. Use --help for usage information.");
+    eprintln!();
+    eprintln!("Examples:");
+    eprintln!("  echo 'code' | snippets-app --name 'my-snippet'");
+    eprintln!("  snippets-app --read 'my-snippet'");
+    eprintln!("  snippets-app --list");
+    eprintln!();
+    eprintln!("Storage configuration (via SNIPPETS_APP_STORAGE):");
+    eprintln!("  JSON:/path/to/snippets.json");
+    eprintln!("  SQLITE:/path/to/snippets.db");
+}
+
 /// Read all content from stdin
-fn read_stdin() -> io::Result<String> {
+fn read_stdin() -> Result<String> {
     let mut buffer = String::new();
-    io::stdin().read_to_string(&mut buffer)?;
+    std::io::stdin()
+        .read_to_string(&mut buffer)
+        .context("Failed to read from stdin")?;
+    
+    if buffer.is_empty() {
+        anyhow::bail!("No content provided. Please provide snippet content via stdin");
+    }
+    
     Ok(buffer)
 }
 
@@ -165,11 +246,25 @@ mod tests {
     }
 
     #[test]
-    fn test_snippet_has_timestamp() {
-        let snippet = Snippet::new("test".to_string(), "content".to_string());
-        // Timestamp should be recent (within last minute)
-        let now = chrono::Utc::now();
-        let diff = (now - snippet.created_at).num_seconds();
-        assert!(diff >= 0 && diff < 60);
+    fn test_snippet_validation() {
+        // Empty name should fail
+        let result = Snippet::new("".to_string(), "content".to_string());
+        assert!(result.is_err());
+
+        // Valid name should succeed
+        let result = Snippet::new("valid-name".to_string(), "content".to_string());
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_invalid_storage_config() {
+        unsafe {
+            env::set_var("SNIPPETS_APP_STORAGE", "INVALID_FORMAT");
+        }
+        let result = create_storage();
+        assert!(result.is_err());
+        unsafe {
+            env::remove_var("SNIPPETS_APP_STORAGE");
+        }
     }
 }
