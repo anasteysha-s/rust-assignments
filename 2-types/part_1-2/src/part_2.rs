@@ -1,6 +1,9 @@
-// part_2.rs
+// part_2.rs - Updated with proper types
 
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use std::time::Duration;
+use url::Url;
 
 /// Represents the response type
 #[derive(Debug, Deserialize, Serialize, PartialEq)]
@@ -15,7 +18,8 @@ pub enum ResponseType {
 pub struct PublicTariff {
     pub id: u32,
     pub price: u32,
-    pub duration: String,
+    #[serde(with = "humantime_serde")]
+    pub duration: Duration,
     pub description: String,
 }
 
@@ -23,17 +27,18 @@ pub struct PublicTariff {
 #[derive(Debug, Deserialize, Serialize, PartialEq)]
 pub struct PrivateTariff {
     pub client_price: u32,
-    pub duration: String,
+    #[serde(with = "humantime_serde")]
+    pub duration: Duration,
     pub description: String,
 }
 
 /// Stream settings and configuration
 #[derive(Debug, Deserialize, Serialize, PartialEq)]
 pub struct Stream {
-    pub user_id: String, // UUID as string
+    pub user_id: String, // UUID as string (could use uuid crate for stricter typing)
     pub is_private: bool,
     pub settings: u32,
-    pub shard_url: String,
+    pub shard_url: Url,
     pub public_tariff: PublicTariff,
     pub private_tariff: PrivateTariff,
 }
@@ -49,8 +54,9 @@ pub struct Gift {
 /// Debug information
 #[derive(Debug, Deserialize, Serialize, PartialEq)]
 pub struct Debug {
-    pub duration: String,
-    pub at: String, // ISO 8601 datetime as string
+    #[serde(with = "humantime_serde")]
+    pub duration: Duration,
+    pub at: DateTime<Utc>,
 }
 
 /// Main request structure
@@ -183,27 +189,34 @@ mod tests {
         );
         assert!(!request.stream.is_private);
         assert_eq!(request.stream.settings, 45345);
-        assert_eq!(request.stream.shard_url, "https://n3.example.com/sapi");
     }
 
     #[test]
-    fn test_public_tariff() {
+    fn test_shard_url_is_valid() {
+        let request = Request::from_json(TEST_JSON).unwrap();
+        assert_eq!(request.stream.shard_url.scheme(), "https");
+        assert_eq!(request.stream.shard_url.host_str(), Some("n3.example.com"));
+        assert_eq!(request.stream.shard_url.path(), "/sapi");
+    }
+
+    #[test]
+    fn test_public_tariff_duration() {
         let request = Request::from_json(TEST_JSON).unwrap();
         let public_tariff = &request.stream.public_tariff;
 
         assert_eq!(public_tariff.id, 1);
         assert_eq!(public_tariff.price, 100);
-        assert_eq!(public_tariff.duration, "1h");
+        assert_eq!(public_tariff.duration, Duration::from_secs(3600)); // 1 hour
         assert_eq!(public_tariff.description, "test public tariff");
     }
 
     #[test]
-    fn test_private_tariff() {
+    fn test_private_tariff_duration() {
         let request = Request::from_json(TEST_JSON).unwrap();
         let private_tariff = &request.stream.private_tariff;
 
         assert_eq!(private_tariff.client_price, 250);
-        assert_eq!(private_tariff.duration, "1m");
+        assert_eq!(private_tariff.duration, Duration::from_secs(60)); // 1 minute
         assert_eq!(private_tariff.description, "test private tariff");
     }
 
@@ -222,10 +235,21 @@ mod tests {
     }
 
     #[test]
-    fn test_debug_info() {
+    fn test_debug_info_duration() {
         let request = Request::from_json(TEST_JSON).unwrap();
-        assert_eq!(request.debug.duration, "234ms");
-        assert_eq!(request.debug.at, "2019-06-28T08:35:46+00:00");
+        assert_eq!(request.debug.duration, Duration::from_millis(234));
+    }
+
+    #[test]
+    fn test_debug_info_datetime() {
+        let request = Request::from_json(TEST_JSON).unwrap();
+        
+        // Parse the expected datetime
+        let expected = DateTime::parse_from_rfc3339("2019-06-28T08:35:46+00:00")
+            .unwrap()
+            .with_timezone(&Utc);
+        
+        assert_eq!(request.debug.at, expected);
     }
 
     #[test]
@@ -237,7 +261,6 @@ mod tests {
         let toml_str = toml_result.unwrap();
 
         // Verify TOML contains key sections
-        // Note: the field is serialized as "type" due to #[serde(rename = "type")]
         assert!(toml_str.contains("type") || toml_str.contains("\"type\""));
         assert!(toml_str.contains("[stream]"));
         assert!(toml_str.contains("[[gifts]]"));
@@ -268,7 +291,7 @@ mod tests {
 
     #[test]
     fn test_response_type_enum() {
-        let success_json = r#"{"type": "success", "stream": {"user_id": "test", "is_private": false, "settings": 1, "shard_url": "url", "public_tariff": {"id": 1, "price": 1, "duration": "1h", "description": "d"}, "private_tariff": {"client_price": 1, "duration": "1m", "description": "d"}}, "gifts": [], "debug": {"duration": "1ms", "at": "2019-06-28T08:35:46+00:00"}}"#;
+        let success_json = r#"{"type": "success", "stream": {"user_id": "test", "is_private": false, "settings": 1, "shard_url": "https://example.com", "public_tariff": {"id": 1, "price": 1, "duration": "1h", "description": "d"}, "private_tariff": {"client_price": 1, "duration": "1m", "description": "d"}}, "gifts": [], "debug": {"duration": "1ms", "at": "2019-06-28T08:35:46+00:00"}}"#;
         let request = Request::from_json(success_json).unwrap();
         assert_eq!(request.response_type, ResponseType::Success);
     }
@@ -303,5 +326,28 @@ mod tests {
 
         let request = Request::from_json(json_with_empty_gifts).unwrap();
         assert_eq!(request.gifts.len(), 0);
+    }
+
+    #[test]
+    fn test_duration_formats() {
+        // Test various duration formats supported by humantime_serde
+        let json_1h = r#"{"type": "success", "stream": {"user_id": "test", "is_private": false, "settings": 1, "shard_url": "https://example.com", "public_tariff": {"id": 1, "price": 1, "duration": "1h", "description": "d"}, "private_tariff": {"client_price": 1, "duration": "60s", "description": "d"}}, "gifts": [], "debug": {"duration": "500ms", "at": "2019-06-28T08:35:46+00:00"}}"#;
+        
+        let request = Request::from_json(json_1h).unwrap();
+        assert_eq!(request.stream.public_tariff.duration, Duration::from_secs(3600));
+        assert_eq!(request.stream.private_tariff.duration, Duration::from_secs(60));
+        assert_eq!(request.debug.duration, Duration::from_millis(500));
+    }
+
+    #[test]
+    fn test_url_manipulation() {
+        let request = Request::from_json(TEST_JSON).unwrap();
+        let url = &request.stream.shard_url;
+        
+        // Test URL components
+        assert_eq!(url.scheme(), "https");
+        assert_eq!(url.host_str(), Some("n3.example.com"));
+        assert_eq!(url.port(), None); // Default HTTPS port
+        assert_eq!(url.path(), "/sapi");
     }
 }
