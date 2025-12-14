@@ -1,13 +1,15 @@
 mod storage;
 
+use chrono::Local;
 use clap::Parser;
 use std::io::{self, Read};
-use storage::{get_default_storage_path, SnippetStorage};
+use storage::{create_storage, Snippet};
 
-/// A simple CLI tool for managing code snippets
+/// A simple CLI tool for managing code snippets with timestamps
 #[derive(Parser, Debug)]
 #[command(name = "snippets-app")]
-#[command(about = "Store and manage code snippets", long_about = None)]
+#[command(about = "Store and manage code snippets with creation timestamps", long_about = None)]
+#[command(version = "0.2.0")]
 struct Cli {
     /// Name of the snippet to create (reads content from stdin)
     #[arg(long, value_name = "NAME")]
@@ -21,13 +23,13 @@ struct Cli {
     #[arg(long, value_name = "NAME")]
     delete: Option<String>,
 
-    /// List all snippets
+    /// List all snippets (with creation times)
     #[arg(long)]
     list: bool,
 
-    /// Custom storage file path (optional)
-    #[arg(long, value_name = "PATH")]
-    storage: Option<String>,
+    /// Show verbose output including creation timestamps
+    #[arg(long, short)]
+    verbose: bool,
 }
 
 fn main() {
@@ -40,26 +42,33 @@ fn main() {
 fn run() -> io::Result<()> {
     let cli = Cli::parse();
 
-    // Determine storage path
-    let storage_path = cli
-        .storage
-        .map(|p| p.into())
-        .unwrap_or_else(get_default_storage_path);
-
-    // Load storage
-    let mut storage = SnippetStorage::load_or_create(&storage_path)?;
+    // Create storage based on SNIPPETS_APP_STORAGE environment variable
+    let mut storage = create_storage()?;
 
     // Execute command based on arguments
     if let Some(name) = cli.name {
         // Create snippet: read from stdin
         let content = read_stdin()?;
-        storage.add_snippet(name.clone(), content);
-        storage.save(&storage_path)?;
+        let snippet = Snippet::new(name.clone(), content);
+        storage.save_snippet(snippet.clone())?;
+
         println!("Snippet '{}' saved successfully", name);
+        if cli.verbose {
+            let local_time = snippet.created_at.with_timezone(&Local);
+            println!("Created at: {}", local_time.format("%Y-%m-%d %H:%M:%S"));
+        }
     } else if let Some(name) = cli.read {
         // Read snippet
-        match storage.get_snippet(&name) {
-            Some(content) => print!("{}", content),
+        match storage.get_snippet(&name)? {
+            Some(snippet) => {
+                if cli.verbose {
+                    let local_time = snippet.created_at.with_timezone(&Local);
+                    println!("# Snippet: {}", snippet.name);
+                    println!("# Created: {}", local_time.format("%Y-%m-%d %H:%M:%S"));
+                    println!();
+                }
+                print!("{}", snippet.content);
+            }
             None => {
                 eprintln!("Snippet '{}' not found", name);
                 std::process::exit(1);
@@ -67,8 +76,7 @@ fn run() -> io::Result<()> {
         }
     } else if let Some(name) = cli.delete {
         // Delete snippet
-        if storage.delete_snippet(&name) {
-            storage.save(&storage_path)?;
+        if storage.delete_snippet(&name)? {
             println!("Snippet '{}' deleted successfully", name);
         } else {
             eprintln!("Snippet '{}' not found", name);
@@ -76,18 +84,37 @@ fn run() -> io::Result<()> {
         }
     } else if cli.list {
         // List all snippets
-        let snippets = storage.list_snippets();
-        if snippets.is_empty() {
+        let names = storage.list_snippets()?;
+        if names.is_empty() {
             println!("No snippets found");
         } else {
-            println!("Stored snippets:");
-            for name in snippets {
-                println!("  - {}", name);
+            if cli.verbose {
+                println!("Stored snippets (with creation times):");
+                println!();
+                for name in names {
+                    if let Ok(Some(snippet)) = storage.get_snippet(&name) {
+                        let local_time = snippet.created_at.with_timezone(&Local);
+                        println!(
+                            "  {} - {}",
+                            name,
+                            local_time.format("%Y-%m-%d %H:%M:%S")
+                        );
+                    }
+                }
+            } else {
+                println!("Stored snippets:");
+                for name in names {
+                    println!("  - {}", name);
+                }
             }
         }
     } else {
         // No command specified
         eprintln!("No command specified. Use --help for usage information.");
+        eprintln!();
+        eprintln!("Tip: Set SNIPPETS_APP_STORAGE environment variable to choose storage:");
+        eprintln!("  JSON:/path/to/snippets.json");
+        eprintln!("  SQLITE:/path/to/snippets.db");
         std::process::exit(1);
     }
 
@@ -104,56 +131,45 @@ fn read_stdin() -> io::Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::fs;
+    use std::env;
     use tempfile::NamedTempFile;
 
     #[test]
-    fn test_storage_integration() {
+    fn test_create_storage_with_json() {
         let temp_file = NamedTempFile::new().unwrap();
-        let path = temp_file.path();
-        fs::remove_file(path).unwrap();
+        let path = temp_file.path().to_string_lossy().to_string();
 
-        // Create storage and add snippet
-        let mut storage = SnippetStorage::load_or_create(path).unwrap();
-        storage.add_snippet("test".to_string(), "println!(\"Hello\");".to_string());
-        storage.save(path).unwrap();
-
-        // Load and verify
-        let loaded = SnippetStorage::load_or_create(path).unwrap();
-        assert_eq!(
-            loaded.get_snippet("test"),
-            Some(&"println!(\"Hello\");".to_string())
-        );
+        unsafe {
+            env::set_var("SNIPPETS_APP_STORAGE", format!("JSON:{}", path));
+        }
+        let storage = create_storage();
+        assert!(storage.is_ok());
+        unsafe {
+            env::remove_var("SNIPPETS_APP_STORAGE");
+        }
     }
 
     #[test]
-    fn test_multiple_operations() {
+    fn test_create_storage_with_sqlite() {
         let temp_file = NamedTempFile::new().unwrap();
-        let path = temp_file.path();
-        fs::remove_file(path).unwrap();
+        let path = temp_file.path().to_string_lossy().to_string();
 
-        // Add multiple snippets
-        let mut storage = SnippetStorage::load_or_create(path).unwrap();
-        storage.add_snippet("rust".to_string(), "fn main() {}".to_string());
-        storage.add_snippet("python".to_string(), "print('Hello')".to_string());
-        storage.save(path).unwrap();
+        unsafe {
+            env::set_var("SNIPPETS_APP_STORAGE", format!("SQLITE:{}", path));
+        }
+        let storage = create_storage();
+        assert!(storage.is_ok());
+        unsafe {
+            env::remove_var("SNIPPETS_APP_STORAGE");
+        }
+    }
 
-        // Load and verify count
-        let loaded = SnippetStorage::load_or_create(path).unwrap();
-        assert_eq!(loaded.count(), 2);
-
-        // Delete one
-        let mut loaded = loaded;
-        loaded.delete_snippet("rust");
-        loaded.save(path).unwrap();
-
-        // Load and verify deletion
-        let final_storage = SnippetStorage::load_or_create(path).unwrap();
-        assert_eq!(final_storage.count(), 1);
-        assert_eq!(final_storage.get_snippet("rust"), None);
-        assert_eq!(
-            final_storage.get_snippet("python"),
-            Some(&"print('Hello')".to_string())
-        );
+    #[test]
+    fn test_snippet_has_timestamp() {
+        let snippet = Snippet::new("test".to_string(), "content".to_string());
+        // Timestamp should be recent (within last minute)
+        let now = chrono::Utc::now();
+        let diff = (now - snippet.created_at).num_seconds();
+        assert!(diff >= 0 && diff < 60);
     }
 }
