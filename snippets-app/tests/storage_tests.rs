@@ -12,10 +12,7 @@ mod storage_tests {
     use std::path::Path;
     use tempfile::{NamedTempFile, TempDir};
 
-    // ========================================================================
     // SNIPPET TESTS
-    // ========================================================================
-
     #[test]
     fn test_snippet_new_valid() {
         let snippet = Snippet::new("test".to_string(), "content".to_string()).unwrap();
@@ -66,7 +63,13 @@ mod storage_tests {
 
     #[test]
     fn test_snippet_special_characters_in_name() {
-        let names = vec!["test-name", "test_name", "test.name", "test name", "test123"];
+        let names = vec![
+            "test-name",
+            "test_name",
+            "test.name",
+            "test name",
+            "test123",
+        ];
         for name in names {
             let result = Snippet::new(name.to_string(), "content".to_string());
             assert!(result.is_ok(), "Name '{}' should be valid", name);
@@ -411,7 +414,10 @@ mod storage_tests {
     fn test_parse_storage_config_invalid_format_no_colon() {
         let result = parse_storage_config("JSON/path/to/file");
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("Invalid storage configuration"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Invalid storage configuration"));
     }
 
     #[test]
@@ -424,7 +430,10 @@ mod storage_tests {
     fn test_parse_storage_config_unknown_type() {
         let result = parse_storage_config("REDIS:/path");
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("Unknown storage type"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Unknown storage type"));
     }
 
     #[test]
@@ -569,8 +578,7 @@ mod storage_tests {
         let mut storage = JsonStorage::new(&path).unwrap();
 
         for i in 0..10 {
-            let snippet =
-                Snippet::new(format!("test{}", i), format!("content{}", i)).unwrap();
+            let snippet = Snippet::new(format!("test{}", i), format!("content{}", i)).unwrap();
             storage.save_snippet(snippet).unwrap();
         }
 

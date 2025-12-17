@@ -66,14 +66,16 @@ fn init_logging() -> Result<()> {
     debug!("Initializing logging with level: {}", log_level);
 
     // Create env filter
-    let env_filter = EnvFilter::try_new(&log_level)
-        .context(format!("Invalid log level: {}", log_level))?;
+    let env_filter =
+        EnvFilter::try_new(&log_level).context(format!("Invalid log level: {}", log_level))?;
 
     // Check if log file path is specified
     if let Ok(log_path) = std::env::var("SNIPPETS_APP_LOG_PATH") {
         // Log to file
         let file_appender = tracing_appender::rolling::never(
-            std::path::Path::new(&log_path).parent().unwrap_or(std::path::Path::new(".")),
+            std::path::Path::new(&log_path)
+                .parent()
+                .unwrap_or(std::path::Path::new(".")),
             std::path::Path::new(&log_path)
                 .file_name()
                 .unwrap_or(std::ffi::OsStr::new("snippets-app.log")),
@@ -145,8 +147,8 @@ fn handle_create(
     debug!("Content length: {} bytes", content.len());
 
     // Create snippet with validation
-    let snippet =
-        Snippet::new(name.clone(), content).context(format!("Failed to create snippet '{}'", name))?;
+    let snippet = Snippet::new(name.clone(), content)
+        .context(format!("Failed to create snippet '{}'", name))?;
 
     // Save snippet
     storage
@@ -294,7 +296,8 @@ fn read_stdin() -> Result<String> {
 fn download_content(url: &str) -> Result<String> {
     info!("Downloading content from: {}", url);
 
-    let response = reqwest::blocking::get(url).context(format!("Failed to send GET request to {}", url))?;
+    let response =
+        reqwest::blocking::get(url).context(format!("Failed to send GET request to {}", url))?;
 
     let status = response.status();
     debug!("Response status: {}", status);
@@ -313,8 +316,15 @@ fn download_content(url: &str) -> Result<String> {
         anyhow::bail!("Downloaded content is empty");
     }
 
-    info!("Successfully downloaded {} bytes from {}", content.len(), url);
-    debug!("Content preview: {}...", &content.chars().take(100).collect::<String>());
+    info!(
+        "Successfully downloaded {} bytes from {}",
+        content.len(),
+        url
+    );
+    debug!(
+        "Content preview: {}...",
+        &content.chars().take(100).collect::<String>()
+    );
 
     Ok(content)
 }

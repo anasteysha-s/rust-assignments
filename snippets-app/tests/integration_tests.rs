@@ -79,8 +79,9 @@ fn test_invalid_storage_config() {
 
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("Invalid storage configuration") || 
-            stderr.contains("Configuration error"));
+    assert!(
+        stderr.contains("Invalid storage configuration") || stderr.contains("Configuration error")
+    );
 }
 
 #[test]
@@ -127,7 +128,10 @@ fn test_logging_to_file() {
         .args(&["run", "--", "--list"])
         .env("SNIPPETS_APP_STORAGE", format!("JSON:{}", storage_path))
         .env("SNIPPETS_APP_LOG_LEVEL", "info")
-        .env("SNIPPETS_APP_LOG_PATH", log_path.to_string_lossy().to_string())
+        .env(
+            "SNIPPETS_APP_LOG_PATH",
+            log_path.to_string_lossy().to_string(),
+        )
         .output()
         .expect("Failed to execute");
 
@@ -152,8 +156,10 @@ fn test_verbose_flag() {
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     // Verbose mode should show timestamps
-    assert!(stdout.contains("No snippets found") || 
-            stdout.contains("Stored snippets (with creation times)"));
+    assert!(
+        stdout.contains("No snippets found")
+            || stdout.contains("Stored snippets (with creation times)")
+    );
 }
 
 #[test]
@@ -204,8 +210,7 @@ fn test_no_command_shows_usage() {
 
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("No command specified") || 
-            stderr.contains("--help"));
+    assert!(stderr.contains("No command specified") || stderr.contains("--help"));
 }
 
 // Note: Download tests require network access and are better suited

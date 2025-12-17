@@ -6,17 +6,28 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-/// Represents a code snippet with metadata
+/// Represents a code snippet with metadata.
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct Snippet {
+    /// The unique name of the snippet (1-255 characters, no null bytes)
     pub name: String,
+    
+    /// The content/code of the snippet
     pub content: String,
+    
+    /// When the snippet was created (UTC timestamp)
     pub created_at: DateTime<Utc>,
 }
 
 impl Snippet {
+    /// Create a new snippet with validation.
+    ///
+    /// Validates the name and sets the current timestamp.
+    ///
+    /// # Errors
+    ///
+    /// Returns error if name is empty, too long (>255 chars), or contains null bytes.
     pub fn new(name: String, content: String) -> Result<Self> {
-        // Validate snippet name
         Self::validate_name(&name)?;
 
         Ok(Self {
@@ -69,9 +80,7 @@ pub trait SnippetStorage {
     fn list_snippets(&self) -> Result<Vec<String>>;
 }
 
-// ============================================================================
 // JSON STORAGE IMPLEMENTATION
-// ============================================================================
 
 /// JSON file-based storage
 pub struct JsonStorage {
@@ -80,15 +89,43 @@ pub struct JsonStorage {
 }
 
 impl JsonStorage {
+    /// Create a new JSON storage instance.
+    ///
+    /// Loads existing snippets from the JSON file if it exists. If the file doesn't
+    /// exist or is empty, starts with an empty storage. Automatically creates parent
+    /// directories if they don't exist.
+    ///
+    /// # Arguments
+    ///
+    /// * `path` - Path to the JSON storage file
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StorageError::FileSystem`] if:
+    /// - Parent directories cannot be created
+    /// - File exists but cannot be read
+    ///
+    /// Returns [`StorageError::Json`] if the file contains invalid JSON.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use snippets_app::JsonStorage;
+    ///
+    /// // Create with new file
+    /// let storage = JsonStorage::new("snippets.json")?;
+    ///
+    /// // Create with nested path (creates directories)
+    /// let storage = JsonStorage::new("/path/to/dir/snippets.json")?;
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
     pub fn new<P: AsRef<Path>>(path: P) -> StorageResult<Self> {
         let file_path = path.as_ref().to_path_buf();
 
         // Validate path
         if let Some(parent) = file_path.parent() {
             if !parent.as_os_str().is_empty() && !parent.exists() {
-                fs::create_dir_all(parent).map_err(|e| {
-                    StorageError::file_system(&file_path, e)
-                })?;
+                fs::create_dir_all(parent).map_err(|e| StorageError::file_system(&file_path, e))?;
             }
         }
 
@@ -101,10 +138,7 @@ impl JsonStorage {
                 HashMap::new()
             } else {
                 serde_json::from_str(&content).map_err(|e| {
-                    StorageError::json(
-                        format!("reading JSON file '{}'", file_path.display()),
-                        e,
-                    )
+                    StorageError::json(format!("reading JSON file '{}'", file_path.display()), e)
                 })?
             }
         } else {
@@ -176,6 +210,36 @@ pub struct SqliteStorage {
 }
 
 impl SqliteStorage {
+    /// Create a new SQLite storage instance.
+    ///
+    /// Opens or creates a SQLite database at the given path. Automatically creates
+    /// parent directories if they don't exist. Creates the `snippets` table if it
+    /// doesn't already exist.
+    ///
+    /// # Arguments
+    ///
+    /// * `path` - Path to the SQLite database file
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StorageError::Initialization`] if:
+    /// - Parent directories cannot be created
+    /// - Database file cannot be opened
+    ///
+    /// Returns [`StorageError::Database`] if the `snippets` table cannot be created.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use snippets_app::SqliteStorage;
+    ///
+    /// // Create database in current directory
+    /// let storage = SqliteStorage::new("snippets.db")?;
+    ///
+    /// // Create database with nested path (creates directories)
+    /// let storage = SqliteStorage::new("/path/to/data/snippets.db")?;
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
     pub fn new<P: AsRef<Path>>(path: P) -> StorageResult<Self> {
         let db_path = path.as_ref().to_path_buf();
 
@@ -205,9 +269,7 @@ impl SqliteStorage {
             )",
             [],
         )
-        .map_err(|e| {
-            StorageError::database("creating snippets table", e)
-        })?;
+        .map_err(|e| StorageError::database("creating snippets table", e))?;
 
         Ok(Self { conn })
     }
@@ -224,12 +286,7 @@ impl SnippetStorage for SqliteStorage {
                     snippet.created_at.to_rfc3339()
                 ],
             )
-            .map_err(|e| {
-                StorageError::database(
-                    format!("saving snippet '{}'", snippet.name),
-                    e,
-                )
-            })?;
+            .map_err(|e| StorageError::database(format!("saving snippet '{}'", snippet.name), e))?;
         Ok(())
     }
 
@@ -237,9 +294,7 @@ impl SnippetStorage for SqliteStorage {
         let mut stmt = self
             .conn
             .prepare("SELECT name, content, created_at FROM snippets WHERE name = ?1")
-            .map_err(|e| {
-                StorageError::database("preparing get query", e)
-            })?;
+            .map_err(|e| StorageError::database("preparing get query", e))?;
 
         let result = stmt
             .query_row(params![name], |row| {
@@ -251,12 +306,10 @@ impl SnippetStorage for SqliteStorage {
                 let created_at = DateTime::parse_from_rfc3339(&created_at_str)
                     .map(|dt| dt.with_timezone(&Utc))
                     .map_err(|_| {
-                        rusqlite::Error::ToSqlConversionFailure(Box::new(
-                            std::io::Error::new(
-                                std::io::ErrorKind::InvalidData,
-                                format!("Invalid datetime format: {}", created_at_str),
-                            ),
-                        ))
+                        rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::new(
+                            std::io::ErrorKind::InvalidData,
+                            format!("Invalid datetime format: {}", created_at_str),
+                        )))
                     })?;
 
                 Ok(Snippet {
@@ -266,9 +319,7 @@ impl SnippetStorage for SqliteStorage {
                 })
             })
             .optional()
-            .map_err(|e| {
-                StorageError::database(format!("getting snippet '{}'", name), e)
-            })?;
+            .map_err(|e| StorageError::database(format!("getting snippet '{}'", name), e))?;
 
         Ok(result)
     }
@@ -277,9 +328,7 @@ impl SnippetStorage for SqliteStorage {
         let rows_affected = self
             .conn
             .execute("DELETE FROM snippets WHERE name = ?1", params![name])
-            .map_err(|e| {
-                StorageError::database(format!("deleting snippet '{}'", name), e)
-            })?;
+            .map_err(|e| StorageError::database(format!("deleting snippet '{}'", name), e))?;
 
         Ok(rows_affected > 0)
     }
@@ -304,9 +353,16 @@ impl SnippetStorage for SqliteStorage {
 // STORAGE FACTORY
 // ============================================================================
 
+/// Storage backend type.
+///
+/// Specifies which storage implementation to use. Used in configuration
+/// parsing to determine the appropriate storage backend.
 #[derive(Debug)]
 pub enum StorageType {
+    /// JSON file-based storage backend
     Json,
+    
+    /// SQLite database storage backend
     Sqlite,
 }
 
@@ -455,7 +511,10 @@ mod tests {
     fn test_parse_invalid_format() {
         let result = parse_storage_config("invalid");
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("Invalid storage configuration"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Invalid storage configuration"));
     }
 
     #[test]
@@ -469,6 +528,9 @@ mod tests {
     fn test_parse_unknown_type() {
         let result = parse_storage_config("UNKNOWN:/path");
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("Unknown storage type"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Unknown storage type"));
     }
 }
