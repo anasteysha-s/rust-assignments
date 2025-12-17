@@ -1,0 +1,7 @@
+[package]
+name = "btreemap-procedural-tests"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+btreemap-procedural = { path = "../btreemap-procedural" }
