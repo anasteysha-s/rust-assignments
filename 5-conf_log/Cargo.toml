@@ -1,4 +1,13 @@
 [package]
-name = "assignment-5"
+name = "task_3_9"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
+
+[dependencies]
+clap = { version = "4.5", features = ["derive", "env"] }
+serde = { version = "1.0", features = ["derive"] }
+config = "0.14"  # Add the config crate
+toml = "0.8"
+humantime = "2.1"
+humantime-serde = "1.1"
+anyhow = "1.0"

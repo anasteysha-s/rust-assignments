@@ -1,0 +1,8 @@
+[package]
+name = "btreemap-declarative"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "btreemap_macro"
+path = "src/lib.rs"

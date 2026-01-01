@@ -1,0 +1,18 @@
+[package]
+name = "btreemap-procedural"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+proc-macro = true
+name = "btreemap_proc_macro"
+path = "src/lib.rs"
+
+[dependencies]
+proc-macro2 = "1.0"
+quote = "1.0"
+syn = { version = "2.0", features = ["full", "parsing", "extra-traits"] }
+
+[dev-dependencies]
+# For testing the macro
+trybuild = "1.0"

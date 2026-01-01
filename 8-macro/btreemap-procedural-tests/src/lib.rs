@@ -1,0 +1,242 @@
+use btreemap_proc_macro::btreemap;
+use std::collections::BTreeMap;
+
+#[test]
+fn test_empty_map() {
+    let map: BTreeMap<i32, &str> = btreemap!();
+    assert!(map.is_empty());
+    assert_eq!(map.len(), 0);
+}
+
+#[test]
+fn test_single_pair() {
+    let map = btreemap! {
+        1 => "one"
+    };
+    assert_eq!(map.len(), 1);
+    assert_eq!(map.get(&1), Some(&"one"));
+}
+
+#[test]
+fn test_single_pair_trailing_comma() {
+    let map = btreemap! {
+        1 => "one",
+    };
+    assert_eq!(map.len(), 1);
+    assert_eq!(map.get(&1), Some(&"one"));
+}
+
+#[test]
+fn test_multiple_pairs() {
+    let map = btreemap! {
+        1 => "one",
+        2 => "two",
+        3 => "three"
+    };
+    assert_eq!(map.len(), 3);
+    assert_eq!(map.get(&1), Some(&"one"));
+    assert_eq!(map.get(&2), Some(&"two"));
+    assert_eq!(map.get(&3), Some(&"three"));
+}
+
+#[test]
+fn test_multiple_pairs_trailing_comma() {
+    let map = btreemap! {
+        1 => "one",
+        2 => "two",
+        3 => "three",
+    };
+    assert_eq!(map.len(), 3);
+    assert_eq!(map.get(&3), Some(&"three"));
+}
+
+#[test]
+fn test_string_keys() {
+    let map = btreemap! {
+        "a" => 1,
+        "b" => 2,
+        "c" => 3
+    };
+    assert_eq!(map.len(), 3);
+    assert_eq!(map.get("a"), Some(&1));
+    assert_eq!(map.get("b"), Some(&2));
+    assert_eq!(map.get("c"), Some(&3));
+}
+
+#[test]
+fn test_string_values() {
+    let map = btreemap! {
+        1 => "one".to_string(),
+        2 => "two".to_string(),
+        3 => "three".to_string()
+    };
+    assert_eq!(map.len(), 3);
+    assert_eq!(map.get(&1), Some(&"one".to_string()));
+}
+
+#[test]
+fn test_owned_string_keys() {
+    let map = btreemap! {
+        "apple".to_string() => 1,
+        "banana".to_string() => 2,
+        "cherry".to_string() => 3
+    };
+    assert_eq!(map.len(), 3);
+    assert_eq!(map.get(&"apple".to_string()), Some(&1));
+}
+
+#[test]
+fn test_expressions_as_keys_and_values() {
+    let x = 10;
+    let y = 20;
+    let map = btreemap! {
+        x + 1 => y * 2,
+        x + 2 => y * 3,
+        x + 3 => y * 4
+    };
+    assert_eq!(map.get(&11), Some(&40));
+    assert_eq!(map.get(&12), Some(&60));
+    assert_eq!(map.get(&13), Some(&80));
+}
+
+#[test]
+fn test_sorted_order() {
+    let map = btreemap! {
+        5 => "five",
+        2 => "two",
+        8 => "eight",
+        1 => "one",
+        9 => "nine"
+    };
+
+    let keys: Vec<_> = map.keys().copied().collect();
+    assert_eq!(keys, vec![1, 2, 5, 8, 9]);
+}
+
+#[test]
+fn test_duplicate_keys_last_wins() {
+    let map = btreemap! {
+        1 => "first",
+        1 => "second",
+        1 => "third"
+    };
+    assert_eq!(map.len(), 1);
+    assert_eq!(map.get(&1), Some(&"third"));
+}
+
+#[test]
+fn test_complex_types() {
+    #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
+    struct Point {
+        x: i32,
+        y: i32,
+    }
+
+    let map = btreemap! {
+        Point { x: 0, y: 0 } => "origin",
+        Point { x: 1, y: 0 } => "right",
+        Point { x: 0, y: 1 } => "up"
+    };
+
+    assert_eq!(map.get(&Point { x: 0, y: 0 }), Some(&"origin"));
+    assert_eq!(map.len(), 3);
+}
+
+#[test]
+fn test_nested_maps() {
+    let inner1 = btreemap! {
+        "a" => 1,
+        "b" => 2
+    };
+
+    let inner2 = btreemap! {
+        "c" => 3,
+        "d" => 4
+    };
+
+    let outer = btreemap! {
+        "first" => inner1,
+        "second" => inner2
+    };
+
+    assert_eq!(outer.len(), 2);
+    assert_eq!(outer.get("first").unwrap().get("a"), Some(&1));
+    assert_eq!(outer.get("second").unwrap().get("c"), Some(&3));
+}
+
+#[test]
+fn test_variable_interpolation() {
+    let key1 = "key1";
+    let value1 = 100;
+    let key2 = "key2";
+    let value2 = 200;
+
+    let map = btreemap! {
+        key1 => value1,
+        key2 => value2
+    };
+
+    assert_eq!(map.get(&"key1"), Some(&100));
+    assert_eq!(map.get(&"key2"), Some(&200));
+}
+
+#[test]
+fn test_function_calls() {
+    fn get_key() -> i32 {
+        42
+    }
+    fn get_value() -> &'static str {
+        "answer"
+    }
+
+    let map = btreemap! {
+        get_key() => get_value(),
+        100 => "century"
+    };
+
+    assert_eq!(map.get(&42), Some(&"answer"));
+    assert_eq!(map.get(&100), Some(&"century"));
+}
+
+#[test]
+fn test_mixed_types() {
+    let map = btreemap! {
+        String::from("owned") => 1,
+        String::from("string") => 2,
+        String::from("keys") => 3
+    };
+
+    assert_eq!(map.get(&String::from("owned")), Some(&1));
+    assert_eq!(map.len(), 3);
+}
+
+#[test]
+fn test_large_map() {
+    let map = btreemap! {
+        1 => "a",
+        2 => "b",
+        3 => "c",
+        4 => "d",
+        5 => "e",
+        6 => "f",
+        7 => "g",
+        8 => "h",
+        9 => "i",
+        10 => "j"
+    };
+
+    assert_eq!(map.len(), 10);
+    assert_eq!(map.get(&5), Some(&"e"));
+    assert_eq!(map.get(&10), Some(&"j"));
+}
+
+#[test]
+fn test_method_chaining() {
+    let map = btreemap! {
+        "hello".to_uppercase() => "world".to_uppercase(),
+        "foo".to_uppercase() => "bar".to_uppercase()
+    };
+
+    assert_eq!(map.get(&String::from("HELLO")), Some(&String::from("WORLD")));
+    assert_eq!(map.get(&String::from("FOO")), Some(&String::from("BAR")));
+}
